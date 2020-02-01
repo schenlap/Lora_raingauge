@@ -8,8 +8,8 @@
 // The interrupt pin is attached to D4/GPIO1
 //#define INT_PIN GPIO1
 
-// The interrupt pin is attached to D?/GPIO7 USER Button
-#define INT_PIN GPIO7
+// The interrupt pin is attached to D?/GPIO5
+#define INT_PIN GPIO5
 
 bool accelWoke = false;
 
@@ -58,23 +58,40 @@ uint8_t ConfirmedNbTrials = 8;
 uint8_t AppPort = 1;
 
 /*the application data transmission duty cycle.  value in [ms].*/
-uint32_t APP_TX_DUTYCYCLE = (24 * 60 * 60 * 1000); // 24h
+//uint32_t APP_TX_DUTYCYCLE = (24 * 60 * 60 * 1000); // 24h
+uint32_t APP_TX_DUTYCYCLE = (60 * 60 * 1000); // 1h
+
+uint32_t rain_total = 0;
+uint32_t rain_today = 0;
+
+uint32_t h_cnt = 0;
+
+
+void increment_rain_meter() {
+  rain_total++;
+  rain_today++;
+}
+
 
 /* Prepares the payload of the frame */
-static bool prepareTxFrame( uint8_t port )
+static bool prepareTxFrame( uint8_t port, uint16_t voltage )
 {
   int head;
   AppPort = port;
   switch (port) {
     case 1: // woke up from interrupt
       Serial.println("Sending data packet");
-      AppDataSize = 1;//AppDataSize max value is 64
-      AppData[0] = 0xFF; // set to something useful  
+      AppDataSize = 1 + sizeof(voltage) + sizeof(rain_total);
+      AppData[0] = 0xFF; // set to something else useful
+      memcpy(&AppData[1], &voltage, sizeof(voltage));
+      memcpy(&AppData[1 + sizeof(voltage)], &rain_total, sizeof(rain_total));
       break;
     case 2: // daily wake up
       Serial.println("Sending dev status packet");
-      AppDataSize = 1;//AppDataSize max value is 64
+      AppDataSize = 1 + sizeof(voltage) + sizeof(rain_total);
       AppData[0] = 0xA0; // set to something else useful
+      memcpy(&AppData[1], &voltage, sizeof(voltage));
+      memcpy(&AppData[1 + sizeof(voltage)], &rain_total, sizeof(rain_total));
       break;
   }
   return true;
@@ -95,8 +112,23 @@ void accelWakeup()
   accelWoke = true;
 }
 
+uint16_t read_batt_voltage() {
+  uint16_t voltage;
+  pinMode(ADC_CTL,OUTPUT);
+  digitalWrite(ADC_CTL,LOW);
+  voltage = analogRead(ADC) * 2;
+  digitalWrite(ADC_CTL,HIGH);
+  Serial.print("ADC_battery: ");
+  Serial.print(voltage, DEC);
+  Serial.println("");
+
+  return voltage;
+}
+
+
 void setup() {
   Serial.begin(115200);
+  Serial.println("Beginn Setup");
 
   delay(200); // wait for stable
   accelWoke = false;
@@ -115,13 +147,16 @@ void setup() {
   DeviceState = DEVICE_STATE_INIT;
   LoRaWAN.Ifskipjoin();
 
-  pinMode(INT_PIN, INPUT);
-  attachInterrupt(INT_PIN, accelWakeup, RISING);
+  pinMode(INT_PIN, OUTPUT_PULLUP);
+  digitalWrite(INT_PIN, HIGH);
+  attachInterrupt(INT_PIN, accelWakeup, FALLING);
   Serial.println("Interrupts attached");
 }
 
 void loop()
 {
+  int voltage;
+
   if (accelWoke) {
     uint32_t now = TimerGetCurrentTime();
     Serial.print(now); Serial.println("accel woke");
@@ -148,7 +183,13 @@ void loop()
       }
     case DEVICE_STATE_SEND: // a send is scheduled to occur, usu. daily status
       {
-        prepareTxFrame( DEVPORT );
+        h_cnt++;
+        if (h_cnt >= 24) {
+          h_cnt = 0;
+          rain_today = 0;
+        }
+        voltage =  read_batt_voltage();
+        prepareTxFrame( DEVPORT, voltage); // Timer
         LoRaWAN.Send();
         DeviceState = DEVICE_STATE_CYCLE;
         break;
@@ -164,15 +205,22 @@ void loop()
     case DEVICE_STATE_SLEEP:
       {
         if (accelWoke) {
+          increment_rain_meter();
+          Serial.println("+");
+          voltage = read_batt_voltage();
           if (IsLoRaMacNetworkJoined) {
-            if(prepareTxFrame(APPPORT)) {
+            if(prepareTxFrame(APPPORT, voltage)) { // ext. interrupt
               LoRaWAN.Send();
             }
+          } else {
+            Serial.println("not joined, no not send event");
+            //if(prepareTxFrame(APPPORT, voltage)) { // ext. interrupt
+            //  LoRaWAN.Send();
           }
           accelWoke = false;
         }
         LoRaWAN.Sleep();
-        Serial.println("LoRaWAN.Sleep() finished");
+        //Serial.println("LoRaWAN.Sleep() finished");
         break;
       }
     default:
