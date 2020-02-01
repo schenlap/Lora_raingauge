@@ -1,12 +1,15 @@
 #include "LoRaWan_APP.h"
 #include <Region.h>
 #include "Arduino.h"
-#include "lora_ids.h"
+#include "lora_commissioning.h"
 
 
 
 // The interrupt pin is attached to D4/GPIO1
-#define INT_PIN GPIO1
+//#define INT_PIN GPIO1
+
+// The interrupt pin is attached to D?/GPIO7 USER Button
+#define INT_PIN GPIO7
 
 bool accelWoke = false;
 
@@ -25,7 +28,7 @@ bool KeepNet = LORAWAN_Net_Reserve;
 LoRaMacRegion_t REGION = ACTIVE_REGION;
 
 /* Indicates if the node is sending confirmed or unconfirmed messages */
-bool IsTxConfirmed = LORAWAN_UPLINKMODE;
+bool IsTxConfirmed = 0; //LORAWAN_UPLINKMODE;
 
 /*!
   Number of trials to transmit the frame, if the LoRaMAC layer did not
@@ -77,9 +80,14 @@ static bool prepareTxFrame( uint8_t port )
   return true;
 }
 
+// for OTAA
 extern uint8_t DevEui[];
 extern uint8_t AppEui[];
 extern uint8_t AppKey[];
+// for ABP
+extern uint32_t DevAddr;
+extern uint8_t NwkSKey[];
+extern uint8_t AppSKey[];
 extern bool IsLoRaMacNetworkJoined;
 
 void accelWakeup()
@@ -93,9 +101,15 @@ void setup() {
   delay(200); // wait for stable
   accelWoke = false;
 
+  // for OTAA
   memcpy(DevEui, myDevEui, sizeof(myDevEui));
   memcpy(AppEui, myAppEui, sizeof(myAppEui));
   memcpy(AppKey, myAppKey, sizeof(myAppKey));
+  // for ABP
+  memcpy(&DevAddr, &myDevAddr, sizeof(myDevAddr));
+  memcpy(NwkSKey, myNwkSKey, sizeof(myNwkSKey));
+  memcpy(AppSKey, myAppSKey, sizeof(myAppSKey));
+  
   BoardInitMcu();
   
   DeviceState = DEVICE_STATE_INIT;
