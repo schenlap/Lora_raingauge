@@ -77,21 +77,30 @@ void increment_rain_meter() {
 static bool prepareTxFrame( uint8_t port, uint16_t voltage )
 {
   int head;
+  int offset = 0;
+  
   AppPort = port;
   switch (port) {
     case 1: // woke up from interrupt
       Serial.println("Sending data packet");
       AppDataSize = 1 + sizeof(voltage) + sizeof(rain_total);
-      AppData[0] = 0xFF; // set to something else useful
-      memcpy(&AppData[1], &voltage, sizeof(voltage));
-      memcpy(&AppData[1 + sizeof(voltage)], &rain_total, sizeof(rain_total));
+      memcpy(&AppData[offset], &voltage, sizeof(voltage));
+      offset += sizeof(voltage);
+      memcpy(&AppData[offset], &rain_total, sizeof(rain_total));
+      offset += sizeof(rain_total);
+      memcpy(&AppData[offset], rain_today, sizeof(rain_today));
+      offset += sizeof(rain_today);
+      AppDataSize = offset;
       break;
     case 2: // daily wake up
       Serial.println("Sending dev status packet");
-      AppDataSize = 1 + sizeof(voltage) + sizeof(rain_total);
-      AppData[0] = 0xA0; // set to something else useful
-      memcpy(&AppData[1], &voltage, sizeof(voltage));
-      memcpy(&AppData[1 + sizeof(voltage)], &rain_total, sizeof(rain_total));
+      memcpy(&AppData[offset], &voltage, sizeof(voltage));
+      offset += sizeof(voltage);
+      memcpy(&AppData[offset], &rain_total, sizeof(rain_total));
+      offset += sizeof(rain_total);
+      memcpy(&AppData[offset], rain_today, sizeof(rain_today));
+      offset += sizeof(rain_today);
+      AppDataSize = offset;
       break;
   }
   return true;
@@ -186,7 +195,9 @@ void loop()
         h_cnt++;
         if (h_cnt >= 24) {
           h_cnt = 0;
-          rain_today = 0;
+          for (int i = RAIN_HISTORY_LENGTH - 1; i >= 1; i++)
+            rain_today[i] = rain_today[i - 1];
+          rain_today[0] = 0;
         }
         voltage =  read_batt_voltage();
         prepareTxFrame( DEVPORT, voltage); // Timer
