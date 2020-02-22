@@ -3,11 +3,6 @@
 #include "Arduino.h"
 #include "lora_commissioning.h"
 
-
-
-// The interrupt pin is attached to D4/GPIO1
-//#define INT_PIN GPIO1
-
 // The interrupt pin is attached to D?/GPIO5
 #define INT_PIN GPIO5
 
@@ -59,17 +54,35 @@ uint8_t AppPort = 1;
 
 /*the application data transmission duty cycle.  value in [ms].*/
 //uint32_t APP_TX_DUTYCYCLE = (24 * 60 * 60 * 1000); // 24h
-uint32_t APP_TX_DUTYCYCLE = (60 * 60 * 1000); // 1h
+uint32_t APP_TX_DUTYCYCLE = (120 * 60 * 1000); // 120min
 
-uint32_t rain_total = 0;
-uint32_t rain_today = 0;
+uint16_t rain_total = 0;
 
 uint32_t h_cnt = 0;
 
-
 void increment_rain_meter() {
   rain_total++;
-  rain_today++;
+}
+
+
+//downlink data handle function
+void DownLinkDataHandle(McpsIndication_t *mcpsIndication)
+{
+  Serial.printf("+REV DATA:%s,RXSIZE %d,PORT %d\r\n",mcpsIndication->RxSlot?"RXWIN2":"RXWIN1",mcpsIndication->BufferSize,mcpsIndication->Port);
+  Serial.print("+REV DATA:");
+  for(uint8_t i=0;i<mcpsIndication->BufferSize;i++) {
+    Serial.printf("%02X",mcpsIndication->Buffer[i]);
+  }
+  Serial.println();
+
+  if (mcpsIndication->BufferSize == 1) {
+    Serial.println("Check 1 Byte Message");
+    if (mcpsIndication->Buffer[0] == 0x01) {
+      Serial.println("Reset Total Rain");
+      rain_total = 0;
+    }
+  }
+ 
 }
 
 
@@ -88,8 +101,6 @@ static bool prepareTxFrame( uint8_t port, uint16_t voltage )
       offset += sizeof(voltage);
       memcpy(&AppData[offset], &rain_total, sizeof(rain_total));
       offset += sizeof(rain_total);
-      memcpy(&AppData[offset], rain_today, sizeof(rain_today));
-      offset += sizeof(rain_today);
       AppDataSize = offset;
       break;
     case 2: // daily wake up
@@ -98,8 +109,6 @@ static bool prepareTxFrame( uint8_t port, uint16_t voltage )
       offset += sizeof(voltage);
       memcpy(&AppData[offset], &rain_total, sizeof(rain_total));
       offset += sizeof(rain_total);
-      memcpy(&AppData[offset], rain_today, sizeof(rain_today));
-      offset += sizeof(rain_today);
       AppDataSize = offset;
       break;
   }
@@ -121,15 +130,22 @@ void accelWakeup()
   accelWoke = true;
 }
 
+
 uint16_t read_batt_voltage() {
-  uint16_t voltage;
+  static uint16_t voltage;
+  static uint8_t cnt = 99;
+
+  cnt++;
+  if (cnt >= 4) { 
+    cnt = 0;
+  } else {
+    return voltage;
+  }
+
   pinMode(ADC_CTL,OUTPUT);
   digitalWrite(ADC_CTL,LOW);
   voltage = analogRead(ADC) * 2;
   digitalWrite(ADC_CTL,HIGH);
-  Serial.print("ADC_battery: ");
-  Serial.print(voltage, DEC);
-  Serial.println("");
 
   return voltage;
 }
@@ -192,13 +208,6 @@ void loop()
       }
     case DEVICE_STATE_SEND: // a send is scheduled to occur, usu. daily status
       {
-        h_cnt++;
-        if (h_cnt >= 24) {
-          h_cnt = 0;
-          for (int i = RAIN_HISTORY_LENGTH - 1; i >= 1; i++)
-            rain_today[i] = rain_today[i - 1];
-          rain_today[0] = 0;
-        }
         voltage =  read_batt_voltage();
         prepareTxFrame( DEVPORT, voltage); // Timer
         LoRaWAN.Send();
@@ -217,7 +226,7 @@ void loop()
       {
         if (accelWoke) {
           increment_rain_meter();
-          Serial.println("+");
+
           voltage = read_batt_voltage();
           if (IsLoRaMacNetworkJoined) {
             if(prepareTxFrame(APPPORT, voltage)) { // ext. interrupt
@@ -231,7 +240,7 @@ void loop()
           accelWoke = false;
         }
         LoRaWAN.Sleep();
-        //Serial.println("LoRaWAN.Sleep() finished");
+        
         break;
       }
     default:
