@@ -11,19 +11,22 @@ bool accelWoke = false;
 DeviceClass_t  CLASS = LORAWAN_CLASS;
 
 /*OTAA or ABP*/
-bool OVER_THE_AIR_ACTIVATION = LORAWAN_NETMODE;
+bool overTheAirActivation = LORAWAN_NETMODE;
 
 /* LoRaWAN Adaptive Data Rate */
-bool LORAWAN_ADR_ON = LORAWAN_ADR;
+bool loraWanAdr = LORAWAN_ADR;
 
 /* set LORAWAN_Net_Reserve ON, the node could save the network info to flash, when node reset not need to join again */
-bool KeepNet = LORAWAN_Net_Reserve;
+bool keepNet = LORAWAN_NET_RESERVE;
 
-/*LoraWan REGION*/
-LoRaMacRegion_t REGION = ACTIVE_REGION;
+/*LoraWan region, select in arduino IDE tools*/
+LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
+
+/*LoraWan Class, Class A and Class C are supported*/
+DeviceClass_t  loraWanClass = LORAWAN_CLASS;
 
 /* Indicates if the node is sending confirmed or unconfirmed messages */
-bool IsTxConfirmed = 0; //LORAWAN_UPLINKMODE;
+bool isTxConfirmed = LORAWAN_UPLINKMODE;
 
 /*!
   Number of trials to transmit the frame, if the LoRaMAC layer did not
@@ -45,16 +48,16 @@ bool IsTxConfirmed = 0; //LORAWAN_UPLINKMODE;
   Note, that if NbTrials is set to 1 or 2, the MAC will not decrease
   the datarate, in case the LoRaMAC layer did not receive an acknowledgment
 */
-uint8_t ConfirmedNbTrials = 8;
+uint8_t confirmedNbTrials = 8;
 
 /* Application port */
 #define DEVPORT 2
 #define APPPORT 1
-uint8_t AppPort = 1;
+uint8_t appPort = 1;
 
 /*the application data transmission duty cycle.  value in [ms].*/
-//uint32_t APP_TX_DUTYCYCLE = (24 * 60 * 60 * 1000); // 24h
-uint32_t APP_TX_DUTYCYCLE = (120 * 60 * 1000); // 120min
+//uint32_t appTxDutyCycle = (24 * 60 * 60 * 1000); // 24h
+uint32_t appTxDutyCycle = (120 * 60 * 1000); // 120min
 
 uint16_t rain_total = 0;
 
@@ -92,38 +95,33 @@ static bool prepareTxFrame( uint8_t port, uint16_t voltage )
   int head;
   int offset = 0;
   
-  AppPort = port;
+  appPort = port;
   switch (port) {
     case 1: // woke up from interrupt
       Serial.println("Sending data packet");
-      AppDataSize = 1 + sizeof(voltage) + sizeof(rain_total);
-      memcpy(&AppData[offset], &voltage, sizeof(voltage));
+      appDataSize = 1 + sizeof(voltage) + sizeof(rain_total);
+      memcpy(&appData[offset], &voltage, sizeof(voltage));
       offset += sizeof(voltage);
-      memcpy(&AppData[offset], &rain_total, sizeof(rain_total));
+      memcpy(&appData[offset], &rain_total, sizeof(rain_total));
       offset += sizeof(rain_total);
-      AppDataSize = offset;
+      appDataSize = offset;
       break;
     case 2: // daily wake up
       Serial.println("Sending dev status packet");
-      memcpy(&AppData[offset], &voltage, sizeof(voltage));
+      memcpy(&appData[offset], &voltage, sizeof(voltage));
       offset += sizeof(voltage);
-      memcpy(&AppData[offset], &rain_total, sizeof(rain_total));
+      memcpy(&appData[offset], &rain_total, sizeof(rain_total));
       offset += sizeof(rain_total);
-      AppDataSize = offset;
+      appDataSize = offset;
       break;
   }
   return true;
 }
 
 // for OTAA
-extern uint8_t DevEui[];
-extern uint8_t AppEui[];
-extern uint8_t AppKey[];
-// for ABP
-extern uint32_t DevAddr;
-extern uint8_t NwkSKey[];
-extern uint8_t AppSKey[];
+
 extern bool IsLoRaMacNetworkJoined;
+
 
 void accelWakeup()
 {
@@ -158,19 +156,10 @@ void setup() {
   delay(200); // wait for stable
   accelWoke = false;
 
-  // for OTAA
-  memcpy(DevEui, myDevEui, sizeof(myDevEui));
-  memcpy(AppEui, myAppEui, sizeof(myAppEui));
-  memcpy(AppKey, myAppKey, sizeof(myAppKey));
-  // for ABP
-  memcpy(&DevAddr, &myDevAddr, sizeof(myDevAddr));
-  memcpy(NwkSKey, myNwkSKey, sizeof(myNwkSKey));
-  memcpy(AppSKey, myAppSKey, sizeof(myAppSKey));
+  boardInitMcu();
   
-  BoardInitMcu();
-  
-  DeviceState = DEVICE_STATE_INIT;
-  LoRaWAN.Ifskipjoin();
+  deviceState = DEVICE_STATE_INIT;
+  LoRaWAN.ifskipjoin();
 
   pinMode(INT_PIN, OUTPUT_PULLUP);
   digitalWrite(INT_PIN, HIGH);
@@ -187,7 +176,7 @@ void loop()
     Serial.print(now); Serial.println("accel woke");
   }
 
-  switch ( DeviceState )
+  switch ( deviceState )
   {
     case DEVICE_STATE_INIT:
       {
@@ -197,29 +186,30 @@ void loop()
         getDevParam();
 #endif
         printDevParam();
-        LoRaWAN.Init(CLASS, REGION);
-        DeviceState = DEVICE_STATE_JOIN;
+        LoRaWAN.init(loraWanClass,loraWanRegion);
+        deviceState = DEVICE_STATE_JOIN;
+        Serial.println("INIT done");
         break;
       }
     case DEVICE_STATE_JOIN:
       {
-        LoRaWAN.Join();
+        LoRaWAN.join();
         break;
       }
     case DEVICE_STATE_SEND: // a send is scheduled to occur, usu. daily status
       {
         voltage =  read_batt_voltage();
         prepareTxFrame( DEVPORT, voltage); // Timer
-        LoRaWAN.Send();
-        DeviceState = DEVICE_STATE_CYCLE;
+        LoRaWAN.send();
+        deviceState = DEVICE_STATE_CYCLE;
         break;
       }
     case DEVICE_STATE_CYCLE:
       {
         // Schedule next packet transmission
-        TxDutyCycleTime = APP_TX_DUTYCYCLE + randr( 0, APP_TX_DUTYCYCLE_RND );
-        LoRaWAN.Cycle(TxDutyCycleTime);
-        DeviceState = DEVICE_STATE_SLEEP;
+        txDutyCycleTime = appTxDutyCycle + randr( 0, APP_TX_DUTYCYCLE_RND );
+        LoRaWAN.cycle(txDutyCycleTime);
+        deviceState = DEVICE_STATE_SLEEP;
         break;
       }
     case DEVICE_STATE_SLEEP:
@@ -228,9 +218,10 @@ void loop()
           increment_rain_meter();
 
           voltage = read_batt_voltage();
+
           if (IsLoRaMacNetworkJoined) {
             if(prepareTxFrame(APPPORT, voltage)) { // ext. interrupt
-              LoRaWAN.Send();
+              LoRaWAN.send();
             }
           } else {
             Serial.println("not joined, no not send event");
@@ -239,13 +230,13 @@ void loop()
           }
           accelWoke = false;
         }
-        LoRaWAN.Sleep();
+        LoRaWAN.sleep();
         
         break;
       }
     default:
       {
-        DeviceState = DEVICE_STATE_INIT;
+        deviceState = DEVICE_STATE_INIT;
         break;
       }
   }
