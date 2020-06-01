@@ -57,7 +57,7 @@ uint8_t appPort = 1;
 
 /*the application data transmission duty cycle.  value in [ms].*/
 //uint32_t appTxDutyCycle = (24 * 60 * 60 * 1000); // 24h
-uint32_t appTxDutyCycle = (120 * 60 * 1000); // 120min
+uint32_t appTxDutyCycle = (20 * 60 * 1000); // 20min
 
 uint16_t rain_total = 0;
 
@@ -69,7 +69,7 @@ void increment_rain_meter() {
 
 
 //downlink data handle function
-void DownLinkDataHandle(McpsIndication_t *mcpsIndication)
+void downLinkDataHandle(McpsIndication_t *mcpsIndication)
 {
   Serial.printf("+REV DATA:%s,RXSIZE %d,PORT %d\r\n",mcpsIndication->RxSlot?"RXWIN2":"RXWIN1",mcpsIndication->BufferSize,mcpsIndication->Port);
   Serial.print("+REV DATA:");
@@ -94,7 +94,7 @@ static bool prepareTxFrame( uint8_t port, uint16_t voltage )
 {
   int head;
   int offset = 0;
-  
+
   appPort = port;
   switch (port) {
     case 1: // woke up from interrupt
@@ -134,16 +134,16 @@ uint16_t read_batt_voltage() {
   static uint8_t cnt = 99;
 
   cnt++;
-  if (cnt >= 4) { 
+  if (cnt >= 1) {
     cnt = 0;
   } else {
     return voltage;
   }
 
-  pinMode(ADC_CTL,OUTPUT);
-  digitalWrite(ADC_CTL,LOW);
+  pinMode(VBAT_ADC_CTL,OUTPUT);
+  digitalWrite(VBAT_ADC_CTL,LOW);
   voltage = analogRead(ADC) * 2;
-  digitalWrite(ADC_CTL,HIGH);
+  digitalWrite(VBAT_ADC_CTL,HIGH);
 
   return voltage;
 }
@@ -157,7 +157,7 @@ void setup() {
   accelWoke = false;
 
   boardInitMcu();
-  
+
   deviceState = DEVICE_STATE_INIT;
   LoRaWAN.ifskipjoin();
 
@@ -216,22 +216,10 @@ void loop()
       {
         if (accelWoke) {
           increment_rain_meter();
-
-          voltage = read_batt_voltage();
-
-          if (IsLoRaMacNetworkJoined) {
-            if(prepareTxFrame(APPPORT, voltage)) { // ext. interrupt
-              LoRaWAN.send();
-            }
-          } else {
-            Serial.println("not joined, no not send event");
-            //if(prepareTxFrame(APPPORT, voltage)) { // ext. interrupt
-            //  LoRaWAN.Send();
-          }
           accelWoke = false;
         }
         LoRaWAN.sleep();
-        
+
         break;
       }
     default:
