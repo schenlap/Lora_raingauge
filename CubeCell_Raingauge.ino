@@ -1,6 +1,7 @@
 #include "LoRaWan_APP.h"
 #include <Region.h>
 #include "Arduino.h"
+#include "innerWdt.h"
 #include "lora_commissioning.h"
 
 // The interrupt pin is attached to D?/GPIO5
@@ -90,7 +91,7 @@ void downLinkDataHandle(McpsIndication_t *mcpsIndication)
 
 
 /* Prepares the payload of the frame */
-static bool prepareTxFrame( uint8_t port, uint16_t voltage )
+static bool prepareTxFrame( uint8_t port, uint16_t voltage, uint8_t restart)
 {
   int head;
   int offset = 0;
@@ -104,6 +105,8 @@ static bool prepareTxFrame( uint8_t port, uint16_t voltage )
       offset += sizeof(voltage);
       memcpy(&appData[offset], &rain_total, sizeof(rain_total));
       offset += sizeof(rain_total);
+      appData[offset] = restart;
+      offset += 1;
       appDataSize = offset;
       break;
     case 2: // daily wake up
@@ -112,6 +115,8 @@ static bool prepareTxFrame( uint8_t port, uint16_t voltage )
       offset += sizeof(voltage);
       memcpy(&appData[offset], &rain_total, sizeof(rain_total));
       offset += sizeof(rain_total);
+      appData[offset] = restart;
+      offset += 1;
       appDataSize = offset;
       break;
   }
@@ -165,11 +170,16 @@ void setup() {
   digitalWrite(INT_PIN, HIGH);
   attachInterrupt(INT_PIN, accelWakeup, FALLING);
   Serial.println("Interrupts attached");
+
+  Serial.println("Starting watchdog");
+  /* Enable the WDT, autofeed */
+  innerWdtEnable(true);
 }
 
 void loop()
 {
   int voltage;
+  static uint8_t restart = 1;
 
   if (accelWoke) {
     uint32_t now = TimerGetCurrentTime();
@@ -198,25 +208,31 @@ void loop()
       }
     case DEVICE_STATE_SEND: // a send is scheduled to occur, usu. daily status
       {
+        Serial.println("send");
         voltage =  read_batt_voltage();
-        prepareTxFrame( DEVPORT, voltage); // Timer
+        prepareTxFrame( DEVPORT, voltage, restart); // Timer
+        restart = 0;
         LoRaWAN.send();
         deviceState = DEVICE_STATE_CYCLE;
         break;
       }
     case DEVICE_STATE_CYCLE:
       {
+        Serial.println("cycle");
         // Schedule next packet transmission
-        txDutyCycleTime = appTxDutyCycle + randr( 0, APP_TX_DUTYCYCLE_RND );
+        txDutyCycleTime = appTxDutyCycle; // + randr( 0, APP_TX_DUTYCYCLE_RND );
         LoRaWAN.cycle(txDutyCycleTime);
         deviceState = DEVICE_STATE_SLEEP;
         break;
       }
     case DEVICE_STATE_SLEEP:
       {
+        //Serial.println("sleep");
         if (accelWoke) {
           increment_rain_meter();
           accelWoke = false;
+          //deviceState = DEVICE_STATE_SEND;
+          //break;
         }
         LoRaWAN.sleep();
 
